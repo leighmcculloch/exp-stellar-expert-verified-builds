@@ -1,0 +1,56 @@
+name: Custom Build and Release
+on:
+  release:
+    types: [published]
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - run: rustup update
+    - run: rustup target add wasm32-unknown-unknown
+    - run: cargo version
+
+    # Key Point 1️⃣: Tag the built wasm file with it's source-repo.
+    - uses: stellar/stellar-cli@v22.0.1
+      with:
+        version: '22.0.1'
+    - run: stellar contract build --meta source_repo=github:${{ github.repository }}
+
+    - name: Upload to Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: hello_world.wasm
+        path: target/wasm32-unknown-unknown/release/hello_world.wasm
+
+    # Key Point 2️⃣: Build the attestation for the wasm file.
+    - if: github.event_name == 'release'
+      name: Build Attestation for Release (release only)
+      uses: actions/attest-build-provenance@v1
+      with:
+        subject-name: hello_world.wasm
+        subject-path: target/wasm32-unknown-unknown/release/hello_world.wasm
+
+    - if: github.event_name == 'release'
+      name: Upload to Release (release only)
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          await github.rest.repos.uploadReleaseAsset({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            release_id: ${{ github.event.release.id }},
+            name: 'hello_world.wasm',
+            data: fs.readFileSync('target/wasm32-unknown-unknown/release/hello_world.wasm'),
+          });
